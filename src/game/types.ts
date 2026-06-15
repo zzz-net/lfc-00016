@@ -78,3 +78,13 @@ export const EVENT_SCORES = {
 
 export const MAX_TURNS = 50;
 export const WIN_SCORE = 100;
+export const ARCHIVE_VERSION = 1;
+
+export interface ArchiveData {
+  version: number;
+  exportedAt: number;
+  currentGameState: GameState;
+  currentHistory: GameState[];
+  saves: (SaveData | null)[];
+  autoSave: SaveData | null;
+}

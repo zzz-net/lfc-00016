@@ -6,6 +6,7 @@ import { ControlPanel } from '../components/ControlPanel';
 import { LogPanel } from '../components/LogPanel';
 import { SaveModal } from '../components/SaveModal';
 import { ReplayControls } from '../components/ReplayControls';
+import { ArchiveModal } from '../components/ArchiveModal';
 import { useGameStore } from '../hooks/useGameState';
 import { useKeyboard } from '../hooks/useKeyboard';
 import { Direction } from '../game/types';
@@ -28,10 +29,13 @@ const Home: React.FC = () => {
     endReplay,
     jumpToReplayTurn,
     clearIllegalMessage,
+    performExport,
+    performImport,
   } = useGameStore();
 
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveModalMode, setSaveModalMode] = useState<'save' | 'load'>('save');
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
@@ -118,6 +122,10 @@ const Home: React.FC = () => {
     }
   }, [startReplay, history.length]);
 
+  const handleArchive = useCallback(() => {
+    setShowArchiveModal(true);
+  }, []);
+
   useKeyboard({
     onMove: handleMove,
     onUndo: handleUndo,
@@ -172,6 +180,7 @@ const Home: React.FC = () => {
               onSave={handleOpenSaveModal}
               onLoad={handleOpenLoadModal}
               onReplay={handleReplay}
+              onArchive={handleArchive}
               canUndo={history.length > 0}
               disabled={isReplaying || gameState.isGameOver}
               isReplaying={isReplaying}
@@ -200,6 +209,13 @@ const Home: React.FC = () => {
         onNext={nextReplayStep}
         onExit={endReplay}
         onJumpToTurn={jumpToReplayTurn}
+      />
+
+      <ArchiveModal
+        isOpen={showArchiveModal}
+        onClose={() => setShowArchiveModal(false)}
+        onExport={performExport}
+        onImport={performImport}
       />
 
       {showToast && (

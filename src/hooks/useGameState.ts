@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { GameState, Direction, SaveData } from '../game/types';
+import { GameState, Direction, SaveData, ArchiveData } from '../game/types';
 import { createInitialState, movePlayer, cloneState } from '../game/gameEngine';
-import { saveGame, loadGame, autoSave, loadAutoSave } from '../game/storage';
+import { saveGame, loadGame, autoSave, loadAutoSave, exportArchive, validateArchive, commitArchiveImport } from '../game/storage';
 
 interface GameStore {
   gameState: GameState;
@@ -23,6 +23,8 @@ interface GameStore {
   endReplay: () => void;
   jumpToReplayTurn: (turn: number) => void;
   clearIllegalMessage: () => void;
+  performExport: () => string | null;
+  performImport: (archiveData: ArchiveData) => boolean;
 }
 
 const getInitialState = (): { gameState: GameState; history: GameState[] } => {
@@ -245,5 +247,70 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   clearIllegalMessage: () => {
     set({ lastIllegalMessage: null });
+  },
+
+  performExport: (): string | null => {
+    const { gameState, history } = get();
+    try {
+      return exportArchive(gameState, history);
+    } catch (e) {
+      console.error('Export archive failed:', e);
+      return null;
+    }
+  },
+
+  performImport: (archiveData: ArchiveData): boolean => {
+    const { gameState: prevGameState, history: prevHistory } = get();
+    const prevAutoSave = loadAutoSave();
+    const prevSavesRaw = localStorage.getItem('patrol_chess_saves');
+
+    const success = commitArchiveImport(archiveData);
+    if (!success) return false;
+
+    try {
+      const newState = cloneState(archiveData.currentGameState);
+      const newHistory = archiveData.currentHistory.map(cloneState);
+
+      set({
+        gameState: newState,
+        history: newHistory,
+        isReplaying: false,
+        replayIndex: 0,
+        lastIllegalMessage: null,
+        preReplayState: null,
+        preReplayHistory: null,
+      });
+
+      autoSave(newState, newHistory);
+      return true;
+    } catch (e) {
+      console.error('Import archive state update failed, rolling back:', e);
+      try {
+        if (prevSavesRaw !== null) {
+          localStorage.setItem('patrol_chess_saves', prevSavesRaw);
+        } else {
+          localStorage.removeItem('patrol_chess_saves');
+        }
+        if (prevAutoSave) {
+          localStorage.setItem('patrol_chess_auto', JSON.stringify(prevAutoSave));
+        } else {
+          localStorage.removeItem('patrol_chess_auto');
+        }
+      } catch (rollbackError) {
+        console.error('Rollback also failed:', rollbackError);
+      }
+
+      set({
+        gameState: prevGameState,
+        history: prevHistory,
+        isReplaying: false,
+        replayIndex: 0,
+        lastIllegalMessage: null,
+        preReplayState: null,
+        preReplayHistory: null,
+      });
+
+      return false;
+    }
   },
 }));

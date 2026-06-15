@@ -9,6 +9,7 @@ import {
   Save,
   FolderOpen,
   Play,
+  Package,
 } from 'lucide-react';
 import { Direction } from '../game/types';
 
@@ -19,6 +20,7 @@ interface ControlPanelProps {
   onSave: () => void;
   onLoad: () => void;
   onReplay: () => void;
+  onArchive: () => void;
   canUndo: boolean;
   disabled: boolean;
   isReplaying: boolean;
@@ -31,6 +33,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   onSave,
   onLoad,
   onReplay,
+  onArchive,
   canUndo,
   disabled,
   isReplaying,
@@ -149,6 +152,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             icon={<Play className="w-4 h-4" />}
             label="回放日志"
             disabled={!canUndo}
+            variant="secondary"
+          />
+        </div>
+        <div className="mt-2">
+          <ActionButton
+            onClick={onArchive}
+            icon={<Package className="w-4 h-4" />}
+            label="存档包"
             variant="secondary"
           />
         </div>

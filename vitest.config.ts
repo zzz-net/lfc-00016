@@ -8,11 +8,7 @@ export default defineConfig({
     include: ['src/test/**/*.test.ts'],
     setupFiles: ['./src/test/setup.ts'],
     pool: 'forks',
-    poolOptions: {
-      forks: {
-        singleFork: true,
-      },
-    },
+    singleFork: true,
   },
   resolve: {
     alias: {
