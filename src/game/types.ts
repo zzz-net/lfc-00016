@@ -2,6 +2,98 @@ export type LevelSource = 'official' | 'workshop-draft' | 'workshop-published';
 
 export type LevelStatus = 'draft' | 'published';
 
+export type SnapshotSource =
+  | 'manual-save'
+  | 'playtest-return'
+  | 'pre-publish'
+  | 'manual-snapshot'
+  | 'rollback'
+  | 'import';
+
+export type TimelineActionType =
+  | 'snapshot-create'
+  | 'snapshot-rename'
+  | 'snapshot-delete'
+  | 'rollback'
+  | 'rollback-to-new'
+  | 'conflict-merge'
+  | 'conflict-overwrite'
+  | 'conflict-rename'
+  | 'recovery'
+  | 'export-single'
+  | 'export-full';
+
+export interface LevelDiff {
+  playerStartChanged: boolean;
+  obstaclesAdded: Position[];
+  obstaclesRemoved: Position[];
+  eventsAdded: GameEvent[];
+  eventsRemoved: GameEvent[];
+  eventsModified: GameEvent[];
+  nameChanged: boolean;
+  descriptionChanged: boolean;
+  totalChanges: number;
+}
+
+export interface VersionSnapshot {
+  id: string;
+  levelId: string;
+  name: string;
+  note?: string;
+  source: SnapshotSource;
+  createdAt: number;
+  parentSnapshotId: string | null;
+  levelData: CustomLevel;
+  diffFromParent?: LevelDiff | null;
+}
+
+export interface TimelineLogEntry {
+  id: string;
+  levelId: string;
+  action: TimelineActionType;
+  snapshotId?: string;
+  targetSnapshotId?: string;
+  message: string;
+  timestamp: number;
+  details?: Record<string, unknown>;
+}
+
+export interface LevelTimeline {
+  levelId: string;
+  snapshots: VersionSnapshot[];
+  currentSnapshotId: string | null;
+  lastRollbackSnapshotId: string | null;
+  logs: TimelineLogEntry[];
+  updatedAt: number;
+}
+
+export interface UnsavedEditorDraft {
+  levelId: string | null;
+  levelData: CustomLevel | null;
+  editorHistory: CustomLevel[];
+  editorFuture: CustomLevel[];
+  savedAt: number;
+}
+
+export interface WorkshopTimelineState {
+  timelines: Record<string, LevelTimeline>;
+  unsavedDrafts: Record<string, UnsavedEditorDraft>;
+  activeDraftLevelId: string | null;
+  lastRollbackInfo: {
+    levelId: string;
+    snapshotId: string;
+    timestamp: number;
+  } | null;
+}
+
+export interface WorkshopState {
+  levels: CustomLevel[];
+  lastEditingLevelId: string | null;
+  lastEditingSnapshot: CustomLevel | null;
+  scores: Record<string, WorkshopScore>;
+  timeline?: WorkshopTimelineState;
+}
+
 export interface Position {
   x: number;
   y: number;
@@ -113,6 +205,7 @@ export const STORAGE_KEYS = {
   SETTINGS: 'patrol_chess_settings',
   WORKSHOP: 'patrol_chess_workshop',
   WORKSHOP_AUTO_SAVE: 'patrol_chess_workshop_auto',
+  WORKSHOP_TIMELINE: 'patrol_chess_workshop_timeline',
 };
 
 export const EVENT_SCORES = {

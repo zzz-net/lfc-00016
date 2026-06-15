@@ -18,6 +18,9 @@ import {
   X,
   Info,
   Home,
+  History,
+  FileJson,
+  GitBranch,
 } from 'lucide-react';
 import { CustomLevel, WorkshopScore, Position, BOARD_SIZE } from '../game/types';
 import {
@@ -35,6 +38,13 @@ import {
   exportAllWorkshopLevels,
   NameConflictAction,
   LevelImportResult,
+  createVersionSnapshot,
+  getLevelTimeline,
+  exportFullTimeline,
+  validateTimelineJSON,
+  importTimelineJSON,
+  TimelineImportAction,
+  ImportTimelineResult,
 } from '../game/workshopStorage';
 import { useGameStore } from '../hooks/useGameState';
 import { WorkshopEditor } from '../components/WorkshopEditor';
@@ -109,8 +119,24 @@ export const WorkshopPage: React.FC = () => {
   const [showPublishModal, setShowPublishModal] = useState<{ levelId: string; levelName: string } | null>(null);
   const [publishNote, setPublishNote] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'published'>('all');
+  const [showTimelineImportModal, setShowTimelineImportModal] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const timelineFileInputRef = useRef<HTMLInputElement>(null);
+
+  type TimelineImportPhase = 'idle' | 'selecting' | 'validated' | 'success' | 'error';
+  type TimelineConflictResolution = Record<string, TimelineImportAction>;
+  const [timelineImportPhase, setTimelineImportPhase] = useState<TimelineImportPhase>('idle');
+  const [timelineImportValidation, setTimelineImportValidation] = useState<ReturnType<
+    typeof validateTimelineJSON
+  > | null>(null);
+  const [timelineConflicts, setTimelineConflicts] = useState<
+    Array<{ levelId: string; levelName: string }>
+  >([]);
+  const [timelineConflictResolutions, setTimelineConflictResolutions] = useState<TimelineConflictResolution>({});
+  const [timelineImportResult, setTimelineImportResult] = useState<ImportTimelineResult | null>(null);
+  const [timelineImportErrors, setTimelineImportErrors] = useState<string[]>([]);
+  const [timelineImportRawJson, setTimelineImportRawJson] = useState<string>('');
   const [importPhase, setImportPhase] = useState<ImportPhase>('idle');
   const [importValidation, setImportValidation] = useState<ReturnType<
     typeof validateLevelJSON
@@ -202,6 +228,15 @@ export const WorkshopPage: React.FC = () => {
 
   const handleConfirmPublish = useCallback(() => {
     if (!showPublishModal) return;
+    const level = getWorkshopLevel(showPublishModal.levelId);
+    if (level) {
+      createVersionSnapshot({
+        levelId: level.id,
+        levelData: level,
+        source: 'pre-publish',
+        note: publishNote || `发布 v${level.version} 前快照`,
+      });
+    }
     const result = publishWorkshopLevel(showPublishModal.levelId, publishNote);
     if (result) {
       refreshData();
@@ -265,6 +300,97 @@ export const WorkshopPage: React.FC = () => {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }, []);
+
+  const handleExportTimeline = useCallback((level: CustomLevel) => {
+    const json = exportFullTimeline(level.id);
+    if (!json) {
+      showNotification('该关卡暂无时间线数据', 'error');
+      return;
+    }
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `timeline-${level.name.replace(/[^\w\u4e00-\u9fa5]/g, '_')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showNotification('时间线已导出', 'success');
+  }, [showNotification]);
+
+  const resetTimelineImportState = useCallback(() => {
+    setTimelineImportPhase('idle');
+    setTimelineImportValidation(null);
+    setTimelineConflicts([]);
+    setTimelineConflictResolutions({});
+    setTimelineImportResult(null);
+    setTimelineImportErrors([]);
+    setTimelineImportRawJson('');
+  }, []);
+
+  const handleTimelineFileSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        setTimelineImportRawJson(text);
+        const validation = validateTimelineJSON(text);
+        setTimelineImportValidation(validation);
+
+        if (!validation.valid) {
+          setTimelineImportPhase('error');
+          setTimelineImportErrors(validation.errors);
+          return;
+        }
+
+        const detectedConflicts: Array<{ levelId: string; levelName: string }> = [];
+        if (validation.levelId) {
+          const existing = getWorkshopLevel(validation.levelId);
+          if (existing) {
+            detectedConflicts.push({ levelId: validation.levelId, levelName: existing.name });
+          }
+          const resolutions: TimelineConflictResolution = {};
+          detectedConflicts.forEach((c) => {
+            resolutions[c.levelId] = 'rename';
+          });
+          setTimelineConflictResolutions(resolutions);
+        }
+
+        setTimelineConflicts(detectedConflicts);
+        setTimelineImportPhase('validated');
+      };
+      reader.onerror = () => {
+        setTimelineImportPhase('error');
+        setTimelineImportErrors(['无法读取文件']);
+      };
+      reader.readAsText(file);
+    },
+    []
+  );
+
+  const handleConfirmTimelineImport = useCallback(() => {
+    if (!timelineImportValidation) return;
+
+    const result = importTimelineJSON({
+      jsonString: timelineImportRawJson,
+      onLevelConflict: (_incoming, existing) => {
+        return timelineConflictResolutions[existing.id] || timelineConflictResolutions[existing.name] || 'rename';
+      },
+    });
+
+    setTimelineImportResult(result);
+    if (result.success) {
+      setTimelineImportPhase('success');
+      refreshData();
+    } else {
+      setTimelineImportPhase('error');
+      setTimelineImportErrors(result.errors);
+    }
+  }, [timelineImportValidation, timelineImportRawJson, timelineConflictResolutions, refreshData]);
 
   const resetImportState = useCallback(() => {
     setImportPhase('idle');
@@ -465,6 +591,14 @@ export const WorkshopPage: React.FC = () => {
                 导入关卡
               </button>
               <button
+                onClick={() => setShowTimelineImportModal(true)}
+                className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-slate-500 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
+                title="导入时间线 JSON（单快照或完整时间线）"
+              >
+                <GitBranch className="w-4 h-4" />
+                导入时间线
+              </button>
+              <button
                 onClick={handleExportAll}
                 disabled={levels.length === 0}
                 className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-slate-500 text-white font-medium rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -652,6 +786,13 @@ export const WorkshopPage: React.FC = () => {
                               title="导出关卡 JSON"
                             >
                               <Download className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleExportTimeline(level)}
+                              className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg border border-slate-600 hover:border-slate-500 text-slate-300 hover:text-white transition-all"
+                              title="导出完整时间线 JSON"
+                            >
+                              <History className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => setShowDeleteConfirm(level.id)}
@@ -952,6 +1093,245 @@ export const WorkshopPage: React.FC = () => {
                     onClick={() => {
                       setShowImportModal(false);
                       resetImportState();
+                    }}
+                    className="mt-3 px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg transition-colors"
+                  >
+                    完成
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTimelineImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8">
+          <div className="bg-slate-800 rounded-xl border border-slate-600 shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-700 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <GitBranch className="w-5 h-5 text-purple-400" />
+                导入时间线
+              </h2>
+              <button
+                onClick={() => {
+                  setShowTimelineImportModal(false);
+                  resetTimelineImportState();
+                }}
+                className="p-1 hover:bg-slate-700 rounded-lg transition-colors text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {timelineImportPhase === 'idle' && (
+                <>
+                  <p className="text-sm text-slate-400">
+                    支持导入单个快照 JSON 或完整时间线 JSON。导入同名关卡时可选择合并、覆盖或另存。
+                  </p>
+                  <input
+                    ref={timelineFileInputRef}
+                    type="file"
+                    accept=".json"
+                    onChange={handleTimelineFileSelect}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => timelineFileInputRef.current?.click()}
+                    className="w-full px-4 py-3 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-slate-500 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Upload className="w-4 h-4" />
+                    选择时间线 JSON 文件
+                  </button>
+                </>
+              )}
+
+              {timelineImportPhase === 'error' && (
+                <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <FileWarning className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-red-300 font-medium">导入失败</p>
+                      {timelineImportErrors.map((e, i) => (
+                        <p key={i} className="text-sm text-red-400 mt-1">
+                          {e}
+                        </p>
+                      ))}
+                      <p className="text-xs text-slate-400 mt-2">
+                        现有工坊数据未受任何影响（原子回滚）。
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={resetTimelineImportState}
+                    className="mt-3 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded-lg transition-colors"
+                  >
+                    重新选择
+                  </button>
+                </div>
+              )}
+
+              {timelineImportPhase === 'validated' && timelineImportValidation && (
+                <>
+                  {timelineImportValidation.warnings.length > 0 && (
+                    <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" />
+                        <div className="text-sm text-yellow-300 space-y-1">
+                          {timelineImportValidation.warnings.map((w, i) => (
+                            <p key={i}>{w}</p>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <History className="w-4 h-4 text-purple-400 mt-0.5 flex-shrink-0" />
+                      <div className="text-sm text-purple-300">
+                        <p>
+                          类型：
+                          <span className="font-mono bg-slate-900/50 px-1.5 py-0.5 rounded mx-1">
+                            {timelineImportValidation.kind}
+                          </span>
+                          {timelineImportValidation.kind === 'single-snapshot' && '（单快照）'}
+                          {timelineImportValidation.kind === 'full-timeline' && '（完整时间线）'}
+                        </p>
+                        {timelineImportValidation.level && (
+                          <p className="mt-1">
+                            关卡：<span className="text-cyan-300">{timelineImportValidation.level.name}</span>
+                          </p>
+                        )}
+                        {timelineImportValidation.timeline && (
+                          <p className="mt-1">
+                            快照数：{timelineImportValidation.timeline.snapshots.length}
+                          </p>
+                        )}
+                        {timelineConflicts.length > 0 && (
+                          <p className="mt-1 text-orange-300">
+                            检测到 {timelineConflicts.length} 个同名/同 ID 冲突
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {timelineConflicts.length > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-orange-400" />
+                        冲突处理
+                      </h4>
+                      {timelineConflicts.map((c) => (
+                        <div
+                          key={c.levelId}
+                          className="p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg"
+                        >
+                          <p className="text-sm text-orange-300 mb-2">
+                            「{c.levelName}」已存在
+                          </p>
+                          <div className="grid grid-cols-3 gap-2">
+                            <button
+                              onClick={() =>
+                                setTimelineConflictResolutions((prev) => ({
+                                  ...prev,
+                                  [c.levelId]: 'merge',
+                                }))
+                              }
+                              className={`px-2 py-1.5 text-xs rounded-lg transition-colors ${
+                                timelineConflictResolutions[c.levelId] === 'merge'
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                              }`}
+                            >
+                              合并
+                            </button>
+                            <button
+                              onClick={() =>
+                                setTimelineConflictResolutions((prev) => ({
+                                  ...prev,
+                                  [c.levelId]: 'overwrite',
+                                }))
+                              }
+                              className={`px-2 py-1.5 text-xs rounded-lg transition-colors ${
+                                timelineConflictResolutions[c.levelId] === 'overwrite'
+                                  ? 'bg-red-600 text-white'
+                                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                              }`}
+                            >
+                              覆盖
+                            </button>
+                            <button
+                              onClick={() =>
+                                setTimelineConflictResolutions((prev) => ({
+                                  ...prev,
+                                  [c.levelId]: 'rename',
+                                }))
+                              }
+                              className={`px-2 py-1.5 text-xs rounded-lg transition-colors ${
+                                timelineConflictResolutions[c.levelId] === 'rename'
+                                  ? 'bg-cyan-600 text-white'
+                                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                              }`}
+                            >
+                              另存
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      onClick={resetTimelineImportState}
+                      className="flex-1 px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-lg transition-colors"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={handleConfirmTimelineImport}
+                      className="flex-1 px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Upload className="w-4 h-4" />
+                      确认导入
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {timelineImportPhase === 'success' && timelineImportResult && (
+                <div className="p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-green-300 font-medium">导入成功</p>
+                      <p className="text-sm text-green-400 mt-1">
+                        {timelineImportResult.conflictAction === 'merge' && '合并到现有时间线'}
+                        {timelineImportResult.conflictAction === 'overwrite' && '覆盖了现有时间线'}
+                        {timelineImportResult.conflictAction === 'rename' && `另存为「${timelineImportResult.importedLevel?.name}」`}
+                        {!timelineImportResult.conflictAction && '创建了新关卡及时间线'}
+                      </p>
+                      {timelineImportResult.importedSnapshotsCount !== undefined && (
+                        <p className="text-xs text-green-400/80 mt-1">
+                          共 {timelineImportResult.importedSnapshotsCount} 个快照
+                        </p>
+                      )}
+                      {timelineImportResult.warnings && timelineImportResult.warnings.length > 0 && (
+                        <div className="mt-2 text-xs text-yellow-400 space-y-0.5">
+                          {timelineImportResult.warnings.map((w, i) => (
+                            <p key={i}>警告: {w}</p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowTimelineImportModal(false);
+                      resetTimelineImportState();
                     }}
                     className="mt-3 px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg transition-colors"
                   >

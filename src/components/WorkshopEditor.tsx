@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Save,
   X,
@@ -12,6 +12,10 @@ import {
   Layers,
   Info,
   CheckCircle,
+  Undo2,
+  Redo2,
+  History,
+  Camera,
 } from 'lucide-react';
 import {
   CustomLevel,
@@ -19,6 +23,8 @@ import {
   BOARD_SIZE,
   EditorTool,
   GameEvent,
+  VersionSnapshot,
+  LevelTimeline,
 } from '../game/types';
 import {
   createEmptyLevel,
@@ -27,7 +33,14 @@ import {
   createWorkshopLevel,
   updateWorkshopLevel,
   NameConflictAction,
+  createVersionSnapshot,
+  getLevelTimeline,
+  saveUnsavedEditorDraft,
+  loadUnsavedEditorDraft,
+  clearUnsavedEditorDraft,
+  setLastEditingLevel,
 } from '../game/workshopStorage';
+import { TimelinePanel } from './TimelinePanel';
 
 interface WorkshopEditorProps {
   initialLevel?: CustomLevel;
@@ -37,6 +50,8 @@ interface WorkshopEditorProps {
 }
 
 const posEquals = (a: Position, b: Position): boolean => a.x === b.x && a.y === b.y;
+
+const deepCloneLevel = (lvl: CustomLevel): CustomLevel => JSON.parse(JSON.stringify(lvl));
 
 const getEventColor = (type: string) => {
   switch (type) {
@@ -71,15 +86,35 @@ interface ToolOption {
   color: string;
 }
 
+const MAX_HISTORY = 50;
+
 export const WorkshopEditor: React.FC<WorkshopEditorProps> = ({
   initialLevel,
   onBack,
   onSave,
   onPlay,
 }) => {
-  const [level, setLevel] = useState<CustomLevel>(
-    initialLevel ? JSON.parse(JSON.stringify(initialLevel)) : createEmptyLevel()
-  );
+  const isEditing = !!initialLevel && !!initialLevel.id;
+  const initialLevelRef = useRef(initialLevel);
+
+  const [level, setLevel] = useState<CustomLevel>(() => {
+    if (initialLevel) return deepCloneLevel(initialLevel);
+    const savedDraft = loadUnsavedEditorDraft(null);
+    if (savedDraft?.levelData) return deepCloneLevel(savedDraft.levelData);
+    return createEmptyLevel();
+  });
+
+  const [editorHistory, setEditorHistory] = useState<CustomLevel[]>(() => {
+    if (initialLevel) return [];
+    const savedDraft = loadUnsavedEditorDraft(null);
+    return savedDraft?.editorHistory || [];
+  });
+  const [editorFuture, setEditorFuture] = useState<CustomLevel[]>(() => {
+    if (initialLevel) return [];
+    const savedDraft = loadUnsavedEditorDraft(null);
+    return savedDraft?.editorFuture || [];
+  });
+
   const [selectedTool, setSelectedTool] = useState<EditorTool>('obstacle');
   const [showNameConflict, setShowNameConflict] = useState<{
     existing: CustomLevel;
@@ -90,6 +125,78 @@ export const WorkshopEditor: React.FC<WorkshopEditorProps> = ({
     valid: boolean;
     errors: string[];
   } | null>(null);
+  const [showTimeline, setShowTimeline] = useState<boolean>(!!(initialLevel && initialLevel.id));
+  const [timeline, setTimeline] = useState<LevelTimeline | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const levelId = level.id || initialLevel?.id || null;
+
+  const refreshTimeline = useCallback(() => {
+    if (levelId) {
+      setTimeline(getLevelTimeline(levelId));
+    }
+  }, [levelId]);
+
+  useEffect(() => {
+    refreshTimeline();
+  }, [refreshTimeline]);
+
+  useEffect(() => {
+    const key = initialLevelRef.current?.id || null;
+    saveUnsavedEditorDraft(key, level, editorHistory, editorFuture);
+    if (levelId) {
+      setLastEditingLevel(levelId, level);
+    }
+  }, [level, editorHistory, editorFuture, levelId]);
+
+  const showNotification = useCallback(
+    (message: string, type: 'success' | 'error' = 'success') => {
+      setToast({ message, type });
+      setTimeout(() => setToast(null), 2500);
+    },
+    []
+  );
+
+  const pushHistory = useCallback((prevLevel: CustomLevel) => {
+    setEditorHistory((prev) => {
+      const next = [...prev, deepCloneLevel(prevLevel)];
+      if (next.length > MAX_HISTORY) next.shift();
+      return next;
+    });
+    setEditorFuture([]);
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    if (editorHistory.length === 0) return;
+    const prev = editorHistory[editorHistory.length - 1];
+    setEditorFuture((f) => [deepCloneLevel(level), ...f]);
+    setEditorHistory((h) => h.slice(0, -1));
+    setLevel(deepCloneLevel(prev));
+    setValidationResult(null);
+  }, [editorHistory, level]);
+
+  const handleRedo = useCallback(() => {
+    if (editorFuture.length === 0) return;
+    const next = editorFuture[0];
+    setEditorHistory((h) => [...h, deepCloneLevel(level)]);
+    setEditorFuture((f) => f.slice(1));
+    setLevel(deepCloneLevel(next));
+    setValidationResult(null);
+  }, [editorFuture, level]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleUndo, handleRedo]);
 
   const tools: ToolOption[] = [
     { tool: 'empty', label: '橡皮擦', icon: <Eraser className="w-5 h-5" />, color: 'bg-slate-700 hover:bg-slate-600' },
@@ -100,16 +207,20 @@ export const WorkshopEditor: React.FC<WorkshopEditorProps> = ({
     { tool: 'danger', label: '危险事件', icon: <AlertCircle className="w-5 h-5" />, color: 'bg-red-600 hover:bg-red-500' },
   ];
 
-  const isEditing = !!initialLevel && !!initialLevel.id;
-
   const updateName = useCallback((name: string) => {
-    setLevel((prev) => ({ ...prev, name }));
+    setLevel((prev) => {
+      pushHistory(prev);
+      return { ...prev, name };
+    });
     setValidationResult(null);
-  }, []);
+  }, [pushHistory]);
 
   const updateDescription = useCallback((description: string) => {
-    setLevel((prev) => ({ ...prev, description }));
-  }, []);
+    setLevel((prev) => {
+      pushHistory(prev);
+      return { ...prev, description };
+    });
+  }, [pushHistory]);
 
   const handleCellClick = useCallback(
     (pos: Position) => {
@@ -120,11 +231,14 @@ export const WorkshopEditor: React.FC<WorkshopEditorProps> = ({
 
         switch (selectedTool) {
           case 'empty':
+            pushHistory(prev);
             return next;
           case 'player':
+            pushHistory(prev);
             next.playerStart = { ...pos };
             return next;
           case 'obstacle':
+            pushHistory(prev);
             next.obstacles = [...next.obstacles, { ...pos }];
             return next;
           case 'normal':
@@ -133,6 +247,7 @@ export const WorkshopEditor: React.FC<WorkshopEditorProps> = ({
             if (posEquals(prev.playerStart, pos)) {
               return prev;
             }
+            pushHistory(prev);
             const newEvent: GameEvent = createGameEventForEditor(selectedTool, pos);
             next.events = [...next.events, newEvent];
             return next;
@@ -143,7 +258,7 @@ export const WorkshopEditor: React.FC<WorkshopEditorProps> = ({
       });
       setValidationResult(null);
     },
-    [selectedTool]
+    [selectedTool, pushHistory]
   );
 
   const getCellContent = useCallback(
@@ -155,6 +270,24 @@ export const WorkshopEditor: React.FC<WorkshopEditorProps> = ({
     },
     [level]
   );
+
+  const handleManualSnapshot = useCallback(() => {
+    if (!levelId) {
+      showNotification('请先保存关卡再创建快照', 'error');
+      return;
+    }
+    const snap = createVersionSnapshot({
+      levelId,
+      levelData: level,
+      source: 'manual-snapshot',
+    });
+    if (snap) {
+      showNotification('已创建手动快照', 'success');
+      refreshTimeline();
+    } else {
+      showNotification('快照创建失败', 'error');
+    }
+  }, [levelId, level, refreshTimeline, showNotification]);
 
   const handleSave = useCallback(() => {
     const result = validateLevel(level);
@@ -170,6 +303,13 @@ export const WorkshopEditor: React.FC<WorkshopEditorProps> = ({
         events: level.events,
       });
       if (updated) {
+        createVersionSnapshot({
+          levelId: updated.id,
+          levelData: updated,
+          source: 'manual-save',
+        });
+        clearUnsavedEditorDraft(updated.id);
+        refreshTimeline();
         onSave(updated);
       }
     } else {
@@ -189,13 +329,28 @@ export const WorkshopEditor: React.FC<WorkshopEditorProps> = ({
         },
       });
       if (created && created.name === level.name) {
+        createVersionSnapshot({
+          levelId: created.id,
+          levelData: created,
+          source: 'manual-save',
+        });
+        clearUnsavedEditorDraft(null);
+        setLevel(created);
+        refreshTimeline();
         onSave(created);
       } else if (created) {
+        createVersionSnapshot({
+          levelId: created.id,
+          levelData: created,
+          source: 'manual-save',
+        });
+        clearUnsavedEditorDraft(null);
         setLevel(created);
+        refreshTimeline();
         onSave(created);
       }
     }
-  }, [level, isEditing, onSave]);
+  }, [level, isEditing, onSave, refreshTimeline]);
 
   const handleConflict = useCallback(
     (action: NameConflictAction) => {
@@ -212,11 +367,18 @@ export const WorkshopEditor: React.FC<WorkshopEditorProps> = ({
 
       setShowNameConflict(null);
       if (result) {
+        createVersionSnapshot({
+          levelId: result.id,
+          levelData: result,
+          source: 'manual-save',
+        });
+        clearUnsavedEditorDraft(null);
         setLevel(result);
+        refreshTimeline();
         onSave(result);
       }
     },
-    [showNameConflict, onSave]
+    [showNameConflict, onSave, refreshTimeline]
   );
 
   const handlePlay = useCallback(() => {
@@ -236,36 +398,127 @@ export const WorkshopEditor: React.FC<WorkshopEditorProps> = ({
       });
       if (created) finalLevel = created;
     }
+
+    if (finalLevel.id) {
+      createVersionSnapshot({
+        levelId: finalLevel.id,
+        levelData: finalLevel,
+        source: 'playtest-return',
+        note: '试玩前快照',
+      });
+    }
+
     onPlay(finalLevel);
   }, [level, onPlay]);
 
+  const handleRollback = useCallback(
+    (restored: CustomLevel) => {
+      setLevel((prev) => {
+        pushHistory(prev);
+        return deepCloneLevel(restored);
+      });
+      refreshTimeline();
+      showNotification('已回滚到选中版本，撤销栈保留', 'success');
+    },
+    [pushHistory, refreshTimeline, showNotification]
+  );
+
   const clearBoard = useCallback(() => {
-    setLevel((prev) => ({
-      ...prev,
-      obstacles: [],
-      events: [],
-      playerStart: { x: 0, y: 0 },
-    }));
+    setLevel((prev) => {
+      pushHistory(prev);
+      return {
+        ...prev,
+        obstacles: [],
+        events: [],
+        playerStart: { x: 0, y: 0 },
+      };
+    });
     setValidationResult(null);
-  }, []);
+  }, [pushHistory]);
+
+  const handleClose = useCallback(() => {
+    const key = initialLevelRef.current?.id || null;
+    clearUnsavedEditorDraft(key);
+    onBack();
+  }, [onBack]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8">
-      <div className="bg-slate-800 rounded-xl border border-slate-600 shadow-2xl w-full max-w-6xl mx-4 overflow-hidden">
+      <div className="bg-slate-800 rounded-xl border border-slate-600 shadow-2xl w-full max-w-[1400px] mx-4 overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-700 flex items-center justify-between">
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <Layers className="w-5 h-5 text-cyan-400" />
-            {isEditing ? '编辑关卡' : '新建关卡'}
-          </h2>
-          <button
-            onClick={onBack}
-            className="p-1 hover:bg-slate-700 rounded-lg transition-colors text-slate-400 hover:text-white"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <Layers className="w-5 h-5 text-cyan-400" />
+              {isEditing ? '编辑关卡' : '新建关卡'}
+            </h2>
+            <button
+              onClick={() => setShowTimeline((s) => !s)}
+              className={`px-3 py-1.5 text-xs rounded-lg transition-colors flex items-center gap-1.5 ${
+                showTimeline
+                  ? 'bg-cyan-600 text-white'
+                  : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
+              }`}
+              disabled={!levelId}
+              title={levelId ? '切换时间线面板' : '保存关卡后可查看时间线'}
+            >
+              <History className="w-3.5 h-3.5" />
+              时间线
+              {timeline && (
+                <span className="text-[10px] bg-slate-900/40 px-1.5 py-0.5 rounded">
+                  {timeline.snapshots.length}
+                </span>
+              )}
+            </button>
+            {levelId && (
+              <button
+                onClick={handleManualSnapshot}
+                className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors flex items-center gap-1.5"
+                title="创建手动快照"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                快照
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 mr-2">
+              <button
+                onClick={handleUndo}
+                disabled={editorHistory.length === 0}
+                className="p-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed rounded text-slate-300 hover:text-white transition-colors"
+                title={`撤销 (Ctrl+Z) - ${editorHistory.length} 步`}
+              >
+                <Undo2 className="w-4 h-4" />
+              </button>
+              <button
+                onClick={handleRedo}
+                disabled={editorFuture.length === 0}
+                className="p-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed rounded text-slate-300 hover:text-white transition-colors"
+                title={`重做 (Ctrl+Y) - ${editorFuture.length} 步`}
+              >
+                <Redo2 className="w-4 h-4" />
+              </button>
+            </div>
+            <button
+              onClick={handleClose}
+              className="p-1 hover:bg-slate-700 rounded-lg transition-colors text-slate-400 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
-        <div className="p-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+        {toast && (
+          <div className={`mx-6 mt-3 px-4 py-2 rounded-lg text-sm ${
+            toast.type === 'success'
+              ? 'bg-green-500/20 border border-green-500/30 text-green-300'
+              : 'bg-red-500/20 border border-red-500/30 text-red-300'
+          }`}>
+            {toast.message}
+          </div>
+        )}
+
+        <div className="p-6 grid gap-6" style={{ gridTemplateColumns: showTimeline ? '1fr 320px 300px' : '1fr 320px' }}>
           <div className="flex flex-col items-center">
             <div className="w-full max-w-[450px]">
               <div className="absolute -inset-2 bg-gradient-to-r from-cyan-500/20 via-blue-500/20 to-cyan-500/20 rounded-xl blur-xl" />
@@ -327,7 +580,7 @@ export const WorkshopEditor: React.FC<WorkshopEditorProps> = ({
               </div>
             </div>
             <div className="mt-4 text-xs text-slate-500">
-              点击格子放置当前工具选中的元素，橡皮擦工具可清除
+              点击格子放置当前工具选中的元素，橡皮擦工具可清除 · Ctrl+Z 撤销 · Ctrl+Y 重做
             </div>
           </div>
 
@@ -408,6 +661,12 @@ export const WorkshopEditor: React.FC<WorkshopEditorProps> = ({
                   ({level.playerStart.x}, {level.playerStart.y})
                 </span>
               </div>
+              <div className="flex items-center justify-between text-xs border-t border-slate-700/50 pt-2 mt-2">
+                <span className="text-slate-500">撤销栈</span>
+                <span className="text-slate-400 font-mono">
+                  {editorHistory.length} ← / {editorFuture.length} →
+                </span>
+              </div>
             </div>
 
             {validationResult && !validationResult.valid && (
@@ -433,7 +692,7 @@ export const WorkshopEditor: React.FC<WorkshopEditorProps> = ({
                   清空棋盘
                 </button>
                 <button
-                  onClick={onBack}
+                  onClick={handleClose}
                   className="px-4 py-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-slate-500 text-white text-sm rounded-lg transition-colors flex items-center justify-center gap-2"
                 >
                   <X className="w-4 h-4" />
@@ -445,17 +704,30 @@ export const WorkshopEditor: React.FC<WorkshopEditorProps> = ({
                 className="w-full px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
               >
                 <Save className="w-4 h-4" />
-                {isEditing ? '保存修改' : '保存关卡'}
+                {isEditing ? '保存修改（创建快照）' : '保存关卡（创建快照）'}
               </button>
               <button
                 onClick={handlePlay}
                 className="w-full px-4 py-2.5 bg-green-600 hover:bg-green-500 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
               >
                 <Play className="w-4 h-4" />
-                保存并试玩
+                保存并试玩（创建快照）
               </button>
             </div>
           </div>
+
+          {showTimeline && (
+            <div className="h-[600px]">
+              <TimelinePanel
+                levelId={levelId}
+                currentLevel={level}
+                timeline={timeline}
+                onSnapshotCreated={refreshTimeline}
+                onRollback={handleRollback}
+                onLevelChanged={refreshTimeline}
+              />
+            </div>
+          )}
         </div>
       </div>
 
