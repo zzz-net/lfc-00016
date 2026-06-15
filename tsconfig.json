@@ -30,7 +30,10 @@
     }
   },
   "include": [
-    "src",
+    "src"
+  ],
+  "exclude": [
+    "src/test/**/*",
     "api"
   ]
 }

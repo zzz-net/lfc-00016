@@ -10,6 +10,10 @@ import { GameState, GameEvent, Position, STORAGE_KEYS } from '../game/types';
 import { saveGame, loadGame, autoSave, loadAutoSave } from '../game/storage';
 import { cloneState } from '../game/gameEngine';
 
+// 固定 Math.random，让 processSystemTurn 永远走"无变化"分支，消除测试随机性
+const _originalRandom = Math.random;
+Math.random = () => 0.95;
+
 // Mock localStorage
 const localStorageMock = (() => {
   let store: Record<string, string> = {};

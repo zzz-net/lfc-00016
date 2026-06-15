@@ -1,6 +1,12 @@
 import { expect } from 'vitest';
 
+const originalRandom = Math.random;
+Math.random = () => 0.95;
+
+// @ts-ignore
 global.expect = expect;
+// @ts-ignore
+global.__originalRandom = originalRandom;
 
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
@@ -18,6 +24,17 @@ const localStorageMock = (() => {
   };
 })();
 
+if (typeof window === 'undefined') {
+  // @ts-ignore
+  global.window = {};
+}
+
+// @ts-ignore
 Object.defineProperty(window, 'localStorage', {
   value: localStorageMock,
+  writable: true,
+  configurable: true,
 });
+
+// @ts-ignore
+global.localStorage = localStorageMock;
