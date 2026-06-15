@@ -9,6 +9,8 @@ interface GameStore {
   isReplaying: boolean;
   replayIndex: number;
   lastIllegalMessage: string | null;
+  preReplayState: GameState | null;
+  preReplayHistory: GameState[] | null;
   initGame: () => void;
   move: (direction: Direction) => void;
   undo: () => void;
@@ -23,12 +25,34 @@ interface GameStore {
   clearIllegalMessage: () => void;
 }
 
+const getInitialState = (): { gameState: GameState; history: GameState[] } => {
+  try {
+    const autoSaveData = loadAutoSave();
+    if (autoSaveData) {
+      return {
+        gameState: autoSaveData.gameState,
+        history: autoSaveData.history,
+      };
+    }
+  } catch (e) {
+    console.error('Failed to load auto save on init:', e);
+  }
+  return {
+    gameState: createInitialState(),
+    history: [],
+  };
+};
+
+const initial = getInitialState();
+
 export const useGameStore = create<GameStore>((set, get) => ({
-  gameState: createInitialState(),
-  history: [],
+  gameState: initial.gameState,
+  history: initial.history,
   isReplaying: false,
   replayIndex: 0,
   lastIllegalMessage: null,
+  preReplayState: null,
+  preReplayHistory: null,
 
   initGame: () => {
     const initial = createInitialState();
@@ -38,6 +62,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       isReplaying: false,
       replayIndex: 0,
       lastIllegalMessage: null,
+      preReplayState: null,
+      preReplayHistory: null,
     });
     autoSave(initial, []);
   },
@@ -82,6 +108,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       gameState: previousState,
       history: newHistory,
       lastIllegalMessage: null,
+      preReplayState: null,
+      preReplayHistory: null,
     });
 
     autoSave(previousState, newHistory);
@@ -97,13 +125,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const saveData = loadGame(slot);
     if (!saveData) return false;
 
+    const newState = cloneState(saveData.gameState);
+    const newHistory = saveData.history.map(cloneState);
+
     set({
-      gameState: saveData.gameState,
-      history: saveData.history,
+      gameState: newState,
+      history: newHistory,
       isReplaying: false,
       replayIndex: 0,
       lastIllegalMessage: null,
+      preReplayState: null,
+      preReplayHistory: null,
     });
+
+    autoSave(newState, newHistory);
     return true;
   },
 
@@ -111,13 +146,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const saveData = loadAutoSave();
     if (!saveData) return false;
 
+    const newState = cloneState(saveData.gameState);
+    const newHistory = saveData.history.map(cloneState);
+
     set({
-      gameState: saveData.gameState,
-      history: saveData.history,
+      gameState: newState,
+      history: newHistory,
       isReplaying: false,
       replayIndex: 0,
       lastIllegalMessage: null,
+      preReplayState: null,
+      preReplayHistory: null,
     });
+
+    autoSave(newState, newHistory);
     return true;
   },
 
@@ -130,11 +172,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
       isReplaying: true,
       replayIndex: 0,
       gameState: initialState,
+      preReplayState: cloneState(gameState),
+      preReplayHistory: history.map(cloneState),
     });
   },
 
   nextReplayStep: (): boolean => {
-    const { history, isReplaying, replayIndex, gameState } = get();
+    const { history, isReplaying, replayIndex, preReplayState, preReplayHistory } = get();
     if (!isReplaying) return false;
     if (replayIndex >= history.length) return false;
 
@@ -149,6 +193,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       set({
         isReplaying: false,
         replayIndex: 0,
+        gameState: preReplayState ? cloneState(preReplayState) : history[history.length - 1],
+        history: preReplayHistory ? preReplayHistory.map(cloneState) : history,
+        preReplayState: null,
+        preReplayHistory: null,
       });
       return false;
     }
@@ -168,14 +216,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   endReplay: () => {
-    const { history } = get();
+    const { history, preReplayState, preReplayHistory } = get();
     if (history.length === 0) return;
 
-    const currentState = history[history.length - 1];
+    const finalState = preReplayState ? cloneState(preReplayState) : history[history.length - 1];
+    const finalHistory = preReplayHistory ? preReplayHistory.map(cloneState) : history;
     set({
       isReplaying: false,
       replayIndex: 0,
-      gameState: currentState,
+      gameState: finalState,
+      history: finalHistory,
+      preReplayState: null,
+      preReplayHistory: null,
     });
   },
 
