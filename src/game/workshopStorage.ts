@@ -62,6 +62,16 @@ const isValidCustomLevel = (obj: unknown): obj is CustomLevel => {
   return true;
 };
 
+const normalizeCustomLevel = (obj: CustomLevel): CustomLevel => {
+  return {
+    ...obj,
+    status: (obj.status === 'published') ? 'published' : 'draft',
+    version: typeof obj.version === 'string' && obj.version ? obj.version : '1.0.0',
+    versionNote: typeof obj.versionNote === 'string' ? obj.versionNote : undefined,
+    publishedAt: typeof obj.publishedAt === 'number' ? obj.publishedAt : undefined,
+  };
+};
+
 const isValidWorkshopScore = (obj: unknown): obj is WorkshopScore => {
   if (typeof obj !== 'object' || obj === null) return false;
   const o = obj as Record<string, unknown>;
@@ -92,7 +102,7 @@ export const loadWorkshopState = (): WorkshopState => {
     if (Array.isArray(parsed.levels)) {
       for (const lvl of parsed.levels) {
         if (isValidCustomLevel(lvl)) {
-          state.levels.push(lvl);
+          state.levels.push(normalizeCustomLevel(lvl));
         }
       }
     }
@@ -102,7 +112,7 @@ export const loadWorkshopState = (): WorkshopState => {
     }
 
     if (parsed.lastEditingSnapshot && isValidCustomLevel(parsed.lastEditingSnapshot)) {
-      state.lastEditingSnapshot = parsed.lastEditingSnapshot;
+      state.lastEditingSnapshot = normalizeCustomLevel(parsed.lastEditingSnapshot);
     }
 
     if (typeof parsed.scores === 'object' && parsed.scores !== null) {
@@ -181,6 +191,7 @@ export const createWorkshopLevel = (options: CreateLevelOptions): CustomLevel | 
             playerStart: options.playerStart,
             obstacles: JSON.parse(JSON.stringify(options.obstacles)),
             events: JSON.parse(JSON.stringify(options.events)),
+            status: 'draft',
             updatedAt: now,
           };
           state.levels[idx] = updated;
@@ -204,6 +215,9 @@ export const createWorkshopLevel = (options: CreateLevelOptions): CustomLevel | 
       playerStart: JSON.parse(JSON.stringify(options.playerStart)),
       obstacles: JSON.parse(JSON.stringify(options.obstacles)),
       events: JSON.parse(JSON.stringify(options.events)),
+      status: 'draft',
+      version: '1.0.0',
+      versionNote: '',
       createdAt: now,
       updatedAt: now,
     };
@@ -227,12 +241,21 @@ export const updateWorkshopLevel = (
     if (idx === -1) return null;
 
     const now = Date.now();
+    const hasContentChanges =
+      updates.playerStart !== undefined ||
+      updates.obstacles !== undefined ||
+      updates.events !== undefined ||
+      updates.name !== undefined ||
+      updates.description !== undefined;
+
     const updated: CustomLevel = {
       ...state.levels[idx],
       ...updates,
       obstacles: updates.obstacles ? JSON.parse(JSON.stringify(updates.obstacles)) : state.levels[idx].obstacles,
       events: updates.events ? JSON.parse(JSON.stringify(updates.events)) : state.levels[idx].events,
       playerStart: updates.playerStart ? JSON.parse(JSON.stringify(updates.playerStart)) : state.levels[idx].playerStart,
+      status: hasContentChanges ? 'draft' : (updates.status || state.levels[idx].status),
+      publishedAt: hasContentChanges ? undefined : (updates.publishedAt ?? state.levels[idx].publishedAt),
       updatedAt: now,
     };
 
@@ -241,6 +264,63 @@ export const updateWorkshopLevel = (
     return updated;
   } catch (e) {
     console.error('Update workshop level failed:', e);
+    return null;
+  }
+};
+
+export const publishWorkshopLevel = (
+  id: string,
+  versionNote?: string
+): CustomLevel | null => {
+  try {
+    const state = loadWorkshopState();
+    const idx = state.levels.findIndex((l) => l.id === id);
+    if (idx === -1) return null;
+
+    const now = Date.now();
+    const existing = state.levels[idx];
+    const versionParts = existing.version.split('.').map((v) => parseInt(v) || 0);
+    while (versionParts.length < 3) versionParts.push(0);
+    versionParts[2] += 1;
+    const newVersion = versionParts.join('.');
+
+    const updated: CustomLevel = {
+      ...existing,
+      status: 'published',
+      version: newVersion,
+      versionNote: versionNote || existing.versionNote || '',
+      publishedAt: now,
+      updatedAt: now,
+    };
+
+    state.levels[idx] = updated;
+    saveWorkshopState(state);
+    return updated;
+  } catch (e) {
+    console.error('Publish workshop level failed:', e);
+    return null;
+  }
+};
+
+export const unpublishWorkshopLevel = (id: string): CustomLevel | null => {
+  try {
+    const state = loadWorkshopState();
+    const idx = state.levels.findIndex((l) => l.id === id);
+    if (idx === -1) return null;
+
+    const now = Date.now();
+    const updated: CustomLevel = {
+      ...state.levels[idx],
+      status: 'draft',
+      publishedAt: undefined,
+      updatedAt: now,
+    };
+
+    state.levels[idx] = updated;
+    saveWorkshopState(state);
+    return updated;
+  } catch (e) {
+    console.error('Unpublish workshop level failed:', e);
     return null;
   }
 };
@@ -341,6 +421,9 @@ export const createEmptyLevel = (name = '未命名关卡'): CustomLevel => ({
   playerStart: { x: 0, y: 0 },
   obstacles: [],
   events: [],
+  status: 'draft',
+  version: '1.0.0',
+  versionNote: '',
   createdAt: Date.now(),
   updatedAt: Date.now(),
 });
@@ -485,12 +568,12 @@ export const importWorkshopLevels = (options: ImportLevelsOptions): LevelImportR
           if (action === 'overwrite') {
             const idx = state.levels.findIndex((l) => l.id === existing.id);
             const now = Date.now();
-            state.levels[idx] = {
+            state.levels[idx] = normalizeCustomLevel({
               ...incoming,
               id: existing.id,
               createdAt: existing.createdAt,
               updatedAt: now,
-            };
+            });
             result.importedLevels.push(state.levels[idx]);
           } else {
             const uniqueName = generateUniqueName(
@@ -498,13 +581,13 @@ export const importWorkshopLevels = (options: ImportLevelsOptions): LevelImportR
               state.levels.map((l) => l.name)
             );
             const now = Date.now();
-            const newLevel: CustomLevel = {
+            const newLevel: CustomLevel = normalizeCustomLevel({
               ...incoming,
               id: generateId(),
               name: uniqueName,
               createdAt: now,
               updatedAt: now,
-            };
+            });
             state.levels.push(newLevel);
             result.importedLevels.push(newLevel);
           }
@@ -513,12 +596,12 @@ export const importWorkshopLevels = (options: ImportLevelsOptions): LevelImportR
         }
       } else {
         const now = Date.now();
-        const newLevel: CustomLevel = {
+        const newLevel: CustomLevel = normalizeCustomLevel({
           ...incoming,
           id: generateId(),
           createdAt: now,
           updatedAt: now,
-        };
+        });
         state.levels.push(newLevel);
         result.importedLevels.push(newLevel);
       }
@@ -550,6 +633,10 @@ export const exportWorkshopLevel = (level: CustomLevel): string => {
       playerStart: level.playerStart,
       obstacles: level.obstacles,
       events: level.events,
+      status: level.status,
+      version: level.version,
+      versionNote: level.versionNote || '',
+      publishedAt: level.publishedAt,
       createdAt: level.createdAt,
       updatedAt: level.updatedAt,
       exportedAt: Date.now(),
@@ -570,6 +657,10 @@ export const exportAllWorkshopLevels = (): string => {
         playerStart: l.playerStart,
         obstacles: l.obstacles,
         events: l.events,
+        status: l.status,
+        version: l.version,
+        versionNote: l.versionNote || '',
+        publishedAt: l.publishedAt,
         createdAt: l.createdAt,
         updatedAt: l.updatedAt,
       })),

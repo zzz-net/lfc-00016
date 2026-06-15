@@ -24,6 +24,8 @@ import {
   listWorkshopLevels,
   getWorkshopLevel,
   deleteWorkshopLevel,
+  publishWorkshopLevel,
+  unpublishWorkshopLevel,
   listWorkshopScores,
   getWorkshopScore,
   getLastEditingLevel,
@@ -104,6 +106,9 @@ export const WorkshopPage: React.FC = () => {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [showPublishModal, setShowPublishModal] = useState<{ levelId: string; levelName: string } | null>(null);
+  const [publishNote, setPublishNote] = useState('');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'published'>('all');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importPhase, setImportPhase] = useState<ImportPhase>('idle');
@@ -184,6 +189,42 @@ export const WorkshopPage: React.FC = () => {
       setShowEditor(true);
     }
   }, [getCurrentLevelId, lastEditingInfo, handleEditLevel]);
+
+  const handlePublishLevel = useCallback(
+    (id: string) => {
+      const level = getWorkshopLevel(id);
+      if (!level) return;
+      setPublishNote(level.versionNote || '');
+      setShowPublishModal({ levelId: id, levelName: level.name });
+    },
+    []
+  );
+
+  const handleConfirmPublish = useCallback(() => {
+    if (!showPublishModal) return;
+    const result = publishWorkshopLevel(showPublishModal.levelId, publishNote);
+    if (result) {
+      refreshData();
+      showNotification(`已发布：${result.name} v${result.version}`, 'success');
+    } else {
+      showNotification('发布失败', 'error');
+    }
+    setShowPublishModal(null);
+    setPublishNote('');
+  }, [showPublishModal, publishNote, refreshData, showNotification]);
+
+  const handleUnpublishLevel = useCallback(
+    (id: string) => {
+      const result = unpublishWorkshopLevel(id);
+      if (result) {
+        refreshData();
+        showNotification('已撤回发布', 'success');
+      } else {
+        showNotification('撤回失败', 'error');
+      }
+    },
+    [refreshData, showNotification]
+  );
 
   const handleDeleteLevel = useCallback(
     (id: string) => {
@@ -432,6 +473,38 @@ export const WorkshopPage: React.FC = () => {
                 导出全部
               </button>
             </div>
+            <div className="flex items-center gap-2 ml-4">
+              <button
+                onClick={() => setFilterStatus('all')}
+                className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                  filterStatus === 'all'
+                    ? 'bg-cyan-600 text-white'
+                    : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                }`}
+              >
+                全部
+              </button>
+              <button
+                onClick={() => setFilterStatus('draft')}
+                className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                  filterStatus === 'draft'
+                    ? 'bg-yellow-600 text-white'
+                    : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                }`}
+              >
+                草稿
+              </button>
+              <button
+                onClick={() => setFilterStatus('published')}
+                className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                  filterStatus === 'published'
+                    ? 'bg-green-600 text-white'
+                    : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                }`}
+              >
+                已发布
+              </button>
+            </div>
             <div className="flex items-center gap-4 text-sm text-slate-400">
               <span className="flex items-center gap-1">
                 <Layers className="w-4 h-4" />
@@ -446,7 +519,12 @@ export const WorkshopPage: React.FC = () => {
         </div>
 
         <div className="space-y-4">
-          {levels.length === 0 ? (
+          {(() => {
+            const filteredLevels = levels.filter((l) => {
+              if (filterStatus === 'all') return true;
+              return l.status === filterStatus;
+            });
+            return filteredLevels.length === 0 ? (
             <div className="bg-slate-800/60 backdrop-blur rounded-xl border border-slate-700 p-12 text-center">
               <Layers className="w-16 h-16 text-slate-600 mx-auto mb-4" />
               <h3 className="text-xl text-slate-400 mb-2">工坊空空如也</h3>
@@ -459,8 +537,8 @@ export const WorkshopPage: React.FC = () => {
                 立即创建
               </button>
             </div>
-          ) : (
-            levels.map((level) => {
+            ) : (
+            filteredLevels.map((level) => {
               const score = scores[level.id];
               return (
                 <div
@@ -476,6 +554,18 @@ export const WorkshopPage: React.FC = () => {
                         <div className="min-w-0">
                           <h3 className="text-lg font-bold text-white truncate flex items-center gap-2">
                             {level.name}
+                            <span className="text-xs font-mono text-slate-500">
+                              v{level.version}
+                            </span>
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded border ${
+                                level.status === 'published'
+                                  ? 'bg-green-500/20 text-green-300 border-green-500/30'
+                                  : 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30'
+                              }`}
+                            >
+                              {level.status === 'published' ? '已发布' : '草稿'}
+                            </span>
                           </h3>
                           {level.description && (
                             <p className="text-sm text-slate-400 mt-1 line-clamp-2">
@@ -539,6 +629,23 @@ export const WorkshopPage: React.FC = () => {
                             >
                               <Play className="w-4 h-4" />
                             </button>
+                            {level.status === 'draft' ? (
+                              <button
+                                onClick={() => handlePublishLevel(level.id)}
+                                className="p-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg border border-emerald-500 hover:border-emerald-400 text-white transition-all"
+                                title="发布关卡"
+                              >
+                                <CheckCircle className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleUnpublishLevel(level.id)}
+                                className="p-2 bg-orange-600 hover:bg-orange-500 rounded-lg border border-orange-500 hover:border-orange-400 text-white transition-all"
+                                title="撤回发布"
+                              >
+                                <AlertTriangle className="w-4 h-4" />
+                              </button>
+                            )}
                             <button
                               onClick={() => handleExportLevel(level)}
                               className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg border border-slate-600 hover:border-slate-500 text-slate-300 hover:text-white transition-all"
@@ -561,7 +668,8 @@ export const WorkshopPage: React.FC = () => {
                 </div>
               );
             })
-          )}
+            );
+          })()}
         </div>
       </div>
 
@@ -604,6 +712,52 @@ export const WorkshopPage: React.FC = () => {
                   className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors"
                 >
                   确认删除
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPublishModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-800 rounded-xl border border-slate-600 shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-700 flex items-center gap-2">
+              <CheckCircle className="w-5 h-5 text-green-400" />
+              <h3 className="text-lg font-bold text-white">发布关卡</h3>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-slate-300">
+                即将发布：<span className="text-cyan-400 font-medium">{showPublishModal.levelName}</span>
+              </p>
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">版本说明（可选）</label>
+                <textarea
+                  value={publishNote}
+                  onChange={(e) => setPublishNote(e.target.value)}
+                  placeholder="描述此版本的更新内容..."
+                  rows={3}
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 resize-none"
+                />
+              </div>
+              <p className="text-xs text-slate-500">
+                发布后版本号将自动递增，状态变为「已发布」。
+              </p>
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={() => {
+                    setShowPublishModal(null);
+                    setPublishNote('');
+                  }}
+                  className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleConfirmPublish}
+                  className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors"
+                >
+                  确认发布
                 </button>
               </div>
             </div>

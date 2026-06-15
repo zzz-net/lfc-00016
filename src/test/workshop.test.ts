@@ -23,6 +23,8 @@ import {
   createWorkshopLevel,
   updateWorkshopLevel,
   deleteWorkshopLevel,
+  publishWorkshopLevel,
+  unpublishWorkshopLevel,
   listWorkshopLevels,
   getWorkshopLevel,
   validateLevel,
@@ -468,10 +470,10 @@ describe('关卡工坊 试玩与回工坊 测试', () => {
   });
 
   it('createStateFromCustomLevel 应生成带有workshop标记的GameState', () => {
-    const level = makeTestLevel('工坊关卡1', { id: 'lvl1' });
+    const level = makeTestLevel('工坊关卡1', { id: 'lvl1', status: 'draft' });
     const state = createStateFromCustomLevel(level);
 
-    expect(state.levelSource).toBe('workshop');
+    expect(state.levelSource).toBe('workshop-draft');
     expect(state.levelId).toBe('lvl1');
     expect(state.levelName).toBe('工坊关卡1');
     expect(state.playerPosition).toEqual(level.playerStart);
@@ -479,8 +481,18 @@ describe('关卡工坊 试玩与回工坊 测试', () => {
     expect(state.events.length).toBe(level.events.length);
     expect(state.turn).toBe(1);
     expect(state.score).toBe(0);
-    expect(state.logs[0].levelSource).toBe('workshop');
-    expect(state.logs[0].message).toContain('工坊关卡');
+    expect(state.logs[0].levelSource).toBe('workshop-draft');
+    expect(state.logs[0].message).toContain('工坊');
+  });
+
+  it('createStateFromCustomLevel 已发布关卡应生成workshop-published标记', () => {
+    const level = makeTestLevel('已发布关卡', { id: 'lvl-pub', status: 'published', version: '1.2.0' });
+    const state = createStateFromCustomLevel(level);
+
+    expect(state.levelSource).toBe('workshop-published');
+    expect(state.logs[0].levelSource).toBe('workshop-published');
+    expect(state.logs[0].message).toContain('已发布');
+    expect(state.logs[0].message).toContain('v1.2.0');
   });
 
   it('官方关卡初始状态应标记为official', () => {
@@ -497,6 +509,8 @@ describe('关卡工坊 试玩与回工坊 测试', () => {
       playerStart: { x: 0, y: 0 },
       obstacles: [],
       events: [{ id: 'e1', position: { x: 1, y: 0 }, type: 'normal', score: 10 }],
+      status: 'draft',
+      version: '1.0.0',
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -506,13 +520,13 @@ describe('关卡工坊 试玩与回工坊 测试', () => {
     expect(newState.logs.length).toBeGreaterThan(state.logs.length);
 
     const moveLog = newState.logs.find((l) => l.action === 'move')!;
-    expect(moveLog.levelSource).toBe('workshop');
+    expect(moveLog.levelSource).toBe('workshop-draft');
     expect(moveLog.levelId).toBe('lvl-move');
     expect(moveLog.levelName).toBe('移动测试关卡');
 
     const captureLog = newState.logs.find((l) => l.action === 'capture');
     expect(captureLog).not.toBeUndefined();
-    expect(captureLog?.levelSource).toBe('workshop');
+    expect(captureLog?.levelSource).toBe('workshop-draft');
     expect(newState.score).toBe(10);
   });
 
@@ -618,6 +632,8 @@ describe('关卡工坊 试玩与回工坊 测试', () => {
       playerStart: { x: 0, y: 0 },
       obstacles: [],
       events: [{ id: 'e1', position: { x: 1, y: 0 }, type: 'normal', score: 10 }],
+      status: 'draft',
+      version: '1.0.0',
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -632,7 +648,7 @@ describe('关卡工坊 试玩与回工坊 测试', () => {
     undo();
 
     expect(isWorkshopMode()).toBe(true);
-    expect(useGameStore.getState().gameState.levelSource).toBe('workshop');
+    expect(useGameStore.getState().gameState.levelSource).toBe('workshop-draft');
     expect(useGameStore.getState().gameState.levelId).toBe('lvl-undo');
   });
 });
@@ -692,5 +708,204 @@ describe('关卡工坊 导入导出 JSON 测试', () => {
     expect(reimported.obstacles.length).toBe(3);
     expect(reimported.events.length).toBe(3);
     expect(reimported.events.map((e) => e.type).sort()).toEqual(['bonus', 'danger', 'normal']);
+  });
+});
+
+describe('关卡工坊 发布/撤回发布 测试', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('新创建的关卡默认状态为草稿', () => {
+    const level = createWorkshopLevel({
+      ...makeTestLevel('草稿测试'),
+    })!;
+    expect(level.status).toBe('draft');
+    expect(level.version).toBe('1.0.0');
+    expect(level.publishedAt).toBeUndefined();
+  });
+
+  it('发布草稿关卡应成功并递增版本号', () => {
+    const level = createWorkshopLevel({
+      ...makeTestLevel('发布测试'),
+    })!;
+    expect(level.status).toBe('draft');
+    expect(level.version).toBe('1.0.0');
+
+    const published = publishWorkshopLevel(level.id, '初始版本发布');
+    expect(published).not.toBeNull();
+    expect(published?.status).toBe('published');
+    expect(published?.version).toBe('1.0.1');
+    expect(published?.versionNote).toBe('初始版本发布');
+    expect(published?.publishedAt).toBeDefined();
+    expect(published?.updatedAt).toBeGreaterThanOrEqual(level.updatedAt);
+
+    const fetched = getWorkshopLevel(level.id)!;
+    expect(fetched.status).toBe('published');
+    expect(fetched.version).toBe('1.0.1');
+  });
+
+  it('撤回已发布关卡应成功并恢复为草稿状态', () => {
+    const level = createWorkshopLevel({
+      ...makeTestLevel('撤回测试'),
+    })!;
+    publishWorkshopLevel(level.id);
+
+    const published = getWorkshopLevel(level.id)!;
+    expect(published.status).toBe('published');
+
+    const unpublished = unpublishWorkshopLevel(level.id);
+    expect(unpublished).not.toBeNull();
+    expect(unpublished?.status).toBe('draft');
+    expect(unpublished?.publishedAt).toBeUndefined();
+
+    const fetched = getWorkshopLevel(level.id)!;
+    expect(fetched.status).toBe('draft');
+  });
+
+  it('编辑已发布关卡后应重置为草稿状态', () => {
+    const level = createWorkshopLevel({
+      ...makeTestLevel('编辑测试'),
+    })!;
+    publishWorkshopLevel(level.id);
+
+    const published = getWorkshopLevel(level.id)!;
+    expect(published.status).toBe('published');
+
+    const updated = updateWorkshopLevel(level.id, {
+      description: '修改后的描述',
+    });
+    expect(updated?.status).toBe('draft');
+
+    const fetched = getWorkshopLevel(level.id)!;
+    expect(fetched.status).toBe('draft');
+    expect(fetched.description).toBe('修改后的描述');
+  });
+
+  it('发布不存在的关卡应返回null', () => {
+    const result = publishWorkshopLevel('non-existent-id');
+    expect(result).toBeNull();
+  });
+
+  it('撤回不存在的关卡应返回null', () => {
+    const result = unpublishWorkshopLevel('non-existent-id');
+    expect(result).toBeNull();
+  });
+
+  it('多次发布应持续递增版本号', () => {
+    const level = createWorkshopLevel({
+      ...makeTestLevel('多版本测试'),
+    })!;
+
+    const v1 = publishWorkshopLevel(level.id, '版本1');
+    expect(v1?.version).toBe('1.0.1');
+
+    updateWorkshopLevel(level.id, { description: '修改' });
+
+    const v2 = publishWorkshopLevel(level.id, '版本2');
+    expect(v2?.version).toBe('1.0.2');
+    expect(v2?.versionNote).toBe('版本2');
+  });
+});
+
+describe('关卡工坊 跨重启恢复发布状态 测试', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('跨重启应恢复关卡的发布状态', () => {
+    const l1 = createWorkshopLevel({
+      ...makeTestLevel('草稿关卡'),
+    })!;
+    const l2 = createWorkshopLevel({
+      ...makeTestLevel('已发布关卡'),
+    })!;
+    publishWorkshopLevel(l2.id, '发布测试');
+
+    const before = listWorkshopLevels();
+    expect(before.find((l) => l.id === l1.id)?.status).toBe('draft');
+    expect(before.find((l) => l.id === l2.id)?.status).toBe('published');
+
+    const loaded = loadWorkshopState();
+    expect(loaded.levels.find((l) => l.id === l1.id)?.status).toBe('draft');
+    expect(loaded.levels.find((l) => l.id === l2.id)?.status).toBe('published');
+    expect(loaded.levels.find((l) => l.id === l2.id)?.version).toBe('1.0.1');
+    expect(loaded.levels.find((l) => l.id === l2.id)?.publishedAt).toBeDefined();
+  });
+
+  it('旧版本无status字段的关卡导入后应默认为草稿', () => {
+    const oldLevel: CustomLevel = {
+      id: 'old-level',
+      name: '旧版本关卡',
+      playerStart: { x: 0, y: 0 },
+      obstacles: [],
+      events: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    } as CustomLevel;
+
+    const json = JSON.stringify([oldLevel]);
+    const validated = validateLevelJSON(json);
+    expect(validated.valid).toBe(true);
+
+    const result = importWorkshopLevels({ levels: validated.levels });
+    expect(result.success).toBe(true);
+
+    const imported = getWorkshopLevel(result.importedLevels[0].id)!;
+    expect(imported.status).toBe('draft');
+    expect(imported.version).toBe('1.0.0');
+  });
+
+  it('导出的JSON应包含status和version字段', () => {
+    const level = createWorkshopLevel({
+      ...makeTestLevel('导出字段测试'),
+    })!;
+    publishWorkshopLevel(level.id, '测试版本');
+
+    const publishedLevel = getWorkshopLevel(level.id)!;
+    const json = exportWorkshopLevel(publishedLevel);
+    const parsed = JSON.parse(json);
+    expect(parsed.status).toBe('published');
+    expect(parsed.version).toBe('1.0.1');
+    expect(parsed.versionNote).toBe('测试版本');
+    expect(parsed.publishedAt).toBeDefined();
+  });
+
+  it('试玩已发布关卡日志应标记为workshop-published', () => {
+    const level = createWorkshopLevel({
+      ...makeTestLevel('已发布试玩', {
+        events: [{ id: 'e1', position: { x: 1, y: 0 }, type: 'normal', score: 10 }],
+      }),
+    })!;
+    publishWorkshopLevel(level.id);
+
+    const published = getWorkshopLevel(level.id)!;
+    expect(published.status).toBe('published');
+
+    const state = createStateFromCustomLevel(published);
+    expect(state.levelSource).toBe('workshop-published');
+    expect(state.logs[0].levelSource).toBe('workshop-published');
+    expect(state.logs[0].message).toContain('已发布');
+  });
+
+  it('isWorkshopMode 对草稿和已发布关卡都应返回true', () => {
+    const draft = createWorkshopLevel({
+      ...makeTestLevel('草稿模式'),
+    })!;
+    const published = createWorkshopLevel({
+      ...makeTestLevel('已发布模式'),
+    })!;
+    publishWorkshopLevel(published.id);
+
+    useGameStore.getState().initWorkshopGame(draft, draft);
+    expect(useGameStore.getState().isWorkshopMode()).toBe(true);
+    expect(useGameStore.getState().getLevelStatus()).toBe('draft');
+
+    useGameStore.getState().initWorkshopGame(
+      getWorkshopLevel(published.id)!,
+      getWorkshopLevel(published.id)!
+    );
+    expect(useGameStore.getState().isWorkshopMode()).toBe(true);
+    expect(useGameStore.getState().getLevelStatus()).toBe('published');
   });
 });

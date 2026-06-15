@@ -114,12 +114,13 @@ export const createInitialState = (): GameState => {
 };
 
 export const createStateFromCustomLevel = (level: CustomLevel): GameState => {
-  const source: LevelSource = 'workshop';
+  const source: LevelSource = level.status === 'published' ? 'workshop-published' : 'workshop-draft';
+  const statusLabel = level.status === 'published' ? '已发布' : '草稿';
   const initialLog: LogEntry = stampLogWithLevel(
     {
       turn: 1,
       action: 'system',
-      message: `工坊关卡「${level.name}」开始！移动巡逻单位捕获事件点获得分数。`,
+      message: `工坊${statusLabel}关卡「${level.name}」v${level.version} 开始！移动巡逻单位捕获事件点获得分数。`,
       timestamp: Date.now(),
     },
     source,

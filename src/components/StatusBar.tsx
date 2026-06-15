@@ -59,11 +59,19 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 
   return (
     <div className="bg-slate-800/80 backdrop-blur rounded-xl p-4 border border-slate-700 shadow-lg">
-      {gameState.levelSource === 'workshop' && gameState.levelName && (
-        <div className="mb-3 px-3 py-1.5 bg-purple-500/10 border border-purple-500/30 rounded-lg inline-flex items-center gap-2">
-          <Layers className="w-4 h-4 text-purple-400" />
-          <span className="text-purple-300 text-sm font-medium">
-            工坊关卡：{gameState.levelName}
+      {gameState.levelSource !== 'official' && gameState.levelName && (
+        <div className={`mb-3 px-3 py-1.5 rounded-lg inline-flex items-center gap-2 ${
+          gameState.levelSource === 'workshop-published'
+            ? 'bg-green-500/10 border border-green-500/30'
+            : 'bg-yellow-500/10 border border-yellow-500/30'
+        }`}>
+          <Layers className={`w-4 h-4 ${
+            gameState.levelSource === 'workshop-published' ? 'text-green-400' : 'text-yellow-400'
+          }`} />
+          <span className={`text-sm font-medium ${
+            gameState.levelSource === 'workshop-published' ? 'text-green-300' : 'text-yellow-300'
+          }`}>
+            {gameState.levelSource === 'workshop-published' ? '已发布' : '草稿'}关卡：{gameState.levelName}
           </span>
         </div>
       )}

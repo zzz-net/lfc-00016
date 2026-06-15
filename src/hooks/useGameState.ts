@@ -16,6 +16,7 @@ interface GameStore {
   initWorkshopGame: (level: CustomLevel, snapshot?: CustomLevel) => void;
   exitWorkshopGame: () => void;
   isWorkshopMode: () => boolean;
+  getLevelStatus: () => 'official' | 'draft' | 'published';
   getCurrentLevelId: () => string | undefined;
   move: (direction: Direction) => void;
   undo: () => void;
@@ -106,7 +107,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   isWorkshopMode: () => {
-    return get().gameState.levelSource === 'workshop';
+    return get().gameState.levelSource !== 'official';
+  },
+
+  getLevelStatus: () => {
+    const source = get().gameState.levelSource;
+    if (source === 'workshop-published') return 'published';
+    if (source === 'workshop-draft') return 'draft';
+    return 'official';
   },
 
   getCurrentLevelId: () => {
@@ -132,7 +140,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     const newHistory = [...history, stateBeforeMove];
 
-    if (newState.isGameOver && newState.levelSource === 'workshop' && newState.levelId) {
+    if (newState.isGameOver && newState.levelSource !== 'official' && newState.levelId) {
       const isWin = newState.score >= WIN_SCORE;
       recordWorkshopScore(newState.levelId, newState.score, isWin);
     }

@@ -1,4 +1,6 @@
-export type LevelSource = 'official' | 'workshop';
+export type LevelSource = 'official' | 'workshop-draft' | 'workshop-published';
+
+export type LevelStatus = 'draft' | 'published';
 
 export interface Position {
   x: number;
@@ -32,6 +34,10 @@ export interface CustomLevel {
   playerStart: Position;
   obstacles: Position[];
   events: GameEvent[];
+  status: LevelStatus;
+  version: string;
+  versionNote?: string;
+  publishedAt?: number;
   createdAt: number;
   updatedAt: number;
 }

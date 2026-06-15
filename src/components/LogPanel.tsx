@@ -1,11 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 import { ScrollText, Move, Star, AlertCircle, Settings, XCircle } from 'lucide-react';
-import { LogEntry } from '../game/types';
+import { LogEntry, LevelSource } from '../game/types';
 
 interface LogPanelProps {
   logs: LogEntry[];
   isReplaying: boolean;
-  levelSource?: 'official' | 'workshop';
+  levelSource?: LevelSource;
 }
 
 export const LogPanel: React.FC<LogPanelProps> = ({ logs, isReplaying, levelSource }) => {
@@ -59,21 +59,46 @@ export const LogPanel: React.FC<LogPanelProps> = ({ logs, isReplaying, levelSour
     });
   };
 
+  const getSourceLabel = (source: LevelSource | undefined) => {
+    switch (source) {
+      case 'official':
+        return { text: '官方', className: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' };
+      case 'workshop-draft':
+        return { text: '草稿', className: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' };
+      case 'workshop-published':
+        return { text: '已发布', className: 'bg-green-500/20 text-green-300 border-green-500/30' };
+      default:
+        return null;
+    }
+  };
+
+  const getSourceHeaderLabel = (source: LevelSource | undefined) => {
+    switch (source) {
+      case 'official':
+        return { text: '官方局', className: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' };
+      case 'workshop-draft':
+        return { text: '草稿局', className: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' };
+      case 'workshop-published':
+        return { text: '已发布局', className: 'bg-green-500/20 text-green-300 border-green-500/30' };
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="bg-slate-800/80 backdrop-blur rounded-xl border border-slate-700 shadow-lg flex flex-col h-full">
       <div className="px-4 py-3 border-b border-slate-700 flex items-center gap-2">
         <ScrollText className="w-5 h-5 text-cyan-400" />
         <h3 className="text-slate-200 font-medium">操作日志</h3>
         <div className="flex-1 flex items-center gap-2">
-          {levelSource === 'workshop' ? (
-            <span className="text-xs px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded border border-purple-500/30">
-              工坊局
-            </span>
-          ) : levelSource === 'official' ? (
-            <span className="text-xs px-2 py-0.5 bg-cyan-500/20 text-cyan-300 rounded border border-cyan-500/30">
-              官方局
-            </span>
-          ) : null}
+          {(() => {
+            const label = getSourceHeaderLabel(levelSource);
+            return label ? (
+              <span className={`text-xs px-2 py-0.5 rounded border ${label.className}`}>
+                {label.text}
+              </span>
+            ) : null;
+          })()}
         </div>
         {isReplaying && (
           <span className="text-xs px-2 py-1 bg-purple-500/20 text-purple-300 rounded">
@@ -112,14 +137,12 @@ export const LogPanel: React.FC<LogPanelProps> = ({ logs, isReplaying, levelSour
                     </span>
                     {log.levelSource && (
                       <span
-                        className={`text-xs px-1.5 py-0.5 rounded ${
-                          log.levelSource === 'workshop'
-                            ? 'bg-purple-500/20 text-purple-300'
-                            : 'bg-cyan-500/20 text-cyan-300'
+                        className={`text-xs px-1.5 py-0.5 rounded border ${
+                          getSourceLabel(log.levelSource)?.className || ''
                         }`}
                         title={log.levelName || ''}
                       >
-                        {log.levelSource === 'workshop' ? '工坊' : '官方'}
+                        {getSourceLabel(log.levelSource)?.text || ''}
                       </span>
                     )}
                   </div>
