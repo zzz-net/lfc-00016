@@ -1,7 +1,8 @@
 import { create } from 'zustand';
-import { GameState, Direction, SaveData, ArchiveData } from '../game/types';
-import { createInitialState, movePlayer, cloneState } from '../game/gameEngine';
+import { GameState, Direction, SaveData, ArchiveData, CustomLevel, WIN_SCORE } from '../game/types';
+import { createInitialState, movePlayer, cloneState, createStateFromCustomLevel } from '../game/gameEngine';
 import { saveGame, loadGame, autoSave, loadAutoSave, exportArchive, validateArchive, commitArchiveImport } from '../game/storage';
+import { recordWorkshopScore, setLastEditingLevel } from '../game/workshopStorage';
 
 interface GameStore {
   gameState: GameState;
@@ -12,6 +13,10 @@ interface GameStore {
   preReplayState: GameState | null;
   preReplayHistory: GameState[] | null;
   initGame: () => void;
+  initWorkshopGame: (level: CustomLevel, snapshot?: CustomLevel) => void;
+  exitWorkshopGame: () => void;
+  isWorkshopMode: () => boolean;
+  getCurrentLevelId: () => string | undefined;
   move: (direction: Direction) => void;
   undo: () => void;
   saveToSlot: (slot: number, name: string) => boolean;
@@ -70,6 +75,44 @@ export const useGameStore = create<GameStore>((set, get) => ({
     autoSave(initial, []);
   },
 
+  initWorkshopGame: (level: CustomLevel, snapshot?: CustomLevel) => {
+    const initial = createStateFromCustomLevel(level);
+    setLastEditingLevel(level.id, snapshot || level);
+    set({
+      gameState: initial,
+      history: [],
+      isReplaying: false,
+      replayIndex: 0,
+      lastIllegalMessage: null,
+      preReplayState: null,
+      preReplayHistory: null,
+    });
+    autoSave(initial, []);
+  },
+
+  exitWorkshopGame: () => {
+    setLastEditingLevel(null);
+    const initial = createInitialState();
+    set({
+      gameState: initial,
+      history: [],
+      isReplaying: false,
+      replayIndex: 0,
+      lastIllegalMessage: null,
+      preReplayState: null,
+      preReplayHistory: null,
+    });
+    autoSave(initial, []);
+  },
+
+  isWorkshopMode: () => {
+    return get().gameState.levelSource === 'workshop';
+  },
+
+  getCurrentLevelId: () => {
+    return get().gameState.levelId;
+  },
+
   move: (direction: Direction) => {
     const { gameState, history, isReplaying } = get();
     if (isReplaying) return;
@@ -88,6 +131,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
 
     const newHistory = [...history, stateBeforeMove];
+
+    if (newState.isGameOver && newState.levelSource === 'workshop' && newState.levelId) {
+      const isWin = newState.score >= WIN_SCORE;
+      recordWorkshopScore(newState.levelId, newState.score, isWin);
+    }
 
     set({
       gameState: newState,

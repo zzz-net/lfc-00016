@@ -8,6 +8,8 @@ import {
   EVENT_SCORES,
   MAX_TURNS,
   WIN_SCORE,
+  CustomLevel,
+  LevelSource,
 } from './types';
 
 const generateId = (): string => Math.random().toString(36).substring(2, 11);
@@ -36,6 +38,18 @@ const getRandomEmptyPosition = (
   if (allPositions.length === 0) return null;
   return allPositions[Math.floor(Math.random() * allPositions.length)];
 };
+
+const stampLogWithLevel = (
+  log: LogEntry,
+  source: LevelSource,
+  levelId?: string,
+  levelName?: string
+): LogEntry => ({
+  ...log,
+  levelSource: source,
+  levelId,
+  levelName,
+});
 
 export const createInitialState = (): GameState => {
   const playerPosition: Position = { x: 0, y: 0 };
@@ -76,12 +90,16 @@ export const createInitialState = (): GameState => {
     occupied.push(bonusPos);
   }
 
-  const initialLog: LogEntry = {
-    turn: 1,
-    action: 'system',
-    message: '游戏开始！移动巡逻单位捕获事件点获得分数。',
-    timestamp: Date.now(),
-  };
+  const source: LevelSource = 'official';
+  const initialLog: LogEntry = stampLogWithLevel(
+    {
+      turn: 1,
+      action: 'system',
+      message: '游戏开始！移动巡逻单位捕获事件点获得分数。',
+      timestamp: Date.now(),
+    },
+    source
+  );
 
   return {
     playerPosition,
@@ -91,6 +109,38 @@ export const createInitialState = (): GameState => {
     score: 0,
     isGameOver: false,
     logs: [initialLog],
+    levelSource: source,
+  };
+};
+
+export const createStateFromCustomLevel = (level: CustomLevel): GameState => {
+  const source: LevelSource = 'workshop';
+  const initialLog: LogEntry = stampLogWithLevel(
+    {
+      turn: 1,
+      action: 'system',
+      message: `工坊关卡「${level.name}」开始！移动巡逻单位捕获事件点获得分数。`,
+      timestamp: Date.now(),
+    },
+    source,
+    level.id,
+    level.name
+  );
+
+  return {
+    playerPosition: JSON.parse(JSON.stringify(level.playerStart)),
+    events: level.events.map((e) => ({
+      ...e,
+      position: { ...e.position },
+    })),
+    obstacles: level.obstacles.map((o) => ({ ...o })),
+    turn: 1,
+    score: 0,
+    isGameOver: false,
+    logs: [initialLog],
+    levelSource: source,
+    levelId: level.id,
+    levelName: level.name,
   };
 };
 
@@ -199,12 +249,17 @@ export const processSystemTurn = (state: GameState): {
 
   const log: LogEntry | null =
     systemLogs.length > 0
-      ? {
-          turn: state.turn,
-          action: 'system',
-          message: `系统回合：${systemLogs.join('，')}`,
-          timestamp: Date.now(),
-        }
+      ? stampLogWithLevel(
+          {
+            turn: state.turn,
+            action: 'system',
+            message: `系统回合：${systemLogs.join('，')}`,
+            timestamp: Date.now(),
+          },
+          state.levelSource,
+          state.levelId,
+          state.levelName
+        )
       : null;
 
   return {
@@ -241,15 +296,19 @@ export const movePlayer = (
   newState: GameState;
   logs: LogEntry[];
 } => {
+  const { levelSource, levelId, levelName } = state;
+  const stamp = (log: LogEntry): LogEntry =>
+    stampLogWithLevel(log, levelSource, levelId, levelName);
+
   const validation = validateMove(state, direction);
   if (!validation.valid) {
-    const illegalLog: LogEntry = {
+    const illegalLog: LogEntry = stamp({
       turn: state.turn,
       action: 'illegal',
       direction,
       message: validation.reason || '非法移动',
       timestamp: Date.now(),
-    };
+    });
     return {
       newState: {
         ...state,
@@ -263,7 +322,7 @@ export const movePlayer = (
   const to = getNextPosition(from, direction);
   const newLogs: LogEntry[] = [];
 
-  const moveLog: LogEntry = {
+  const moveLog: LogEntry = stamp({
     turn: state.turn,
     action: 'move',
     direction,
@@ -271,7 +330,7 @@ export const movePlayer = (
     to,
     message: `向${direction === 'up' ? '上' : direction === 'down' ? '下' : direction === 'left' ? '左' : '右'}移动`,
     timestamp: Date.now(),
-  };
+  });
   newLogs.push(moveLog);
 
   const { captured, remaining, scoreChange } = captureEventsAt(state, to);
@@ -286,7 +345,7 @@ export const movePlayer = (
 
   if (captured.length > 0) {
     captured.forEach((event) => {
-      const captureLog: LogEntry = {
+      const captureLog: LogEntry = stamp({
         turn: state.turn,
         action: 'capture',
         to,
@@ -294,7 +353,7 @@ export const movePlayer = (
         scoreChange: event.score,
         message: `捕获${event.type === 'normal' ? '普通' : event.type === 'bonus' ? '奖励' : '危险'}事件，${event.score > 0 ? '+' : ''}${event.score}分`,
         timestamp: Date.now(),
-      };
+      });
       newLogs.push(captureLog);
       newState.logs.push(captureLog);
     });
@@ -304,12 +363,12 @@ export const movePlayer = (
   if (dangerEvent) {
     newState.isGameOver = true;
     newState.gameOverReason = '游戏结束：捕获了危险事件';
-    const gameOverLog: LogEntry = {
+    const gameOverLog: LogEntry = stamp({
       turn: state.turn,
       action: 'gameover',
       message: newState.gameOverReason,
       timestamp: Date.now(),
-    };
+    });
     newLogs.push(gameOverLog);
     newState.logs.push(gameOverLog);
     return { newState, logs: newLogs };
@@ -319,12 +378,12 @@ export const movePlayer = (
   if (gameOverCheck.isOver) {
     newState.isGameOver = true;
     newState.gameOverReason = gameOverCheck.reason;
-    const gameOverLog: LogEntry = {
+    const gameOverLog: LogEntry = stamp({
       turn: state.turn,
       action: 'gameover',
       message: gameOverCheck.reason!,
       timestamp: Date.now(),
-    };
+    });
     newLogs.push(gameOverLog);
     newState.logs.push(gameOverLog);
     return { newState, logs: newLogs };

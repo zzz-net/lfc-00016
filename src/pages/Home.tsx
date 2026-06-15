@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { AlertTriangle, Layers } from 'lucide-react';
 import { Board } from '../components/Board';
 import { StatusBar } from '../components/StatusBar';
 import { ControlPanel } from '../components/ControlPanel';
@@ -12,6 +13,7 @@ import { useKeyboard } from '../hooks/useKeyboard';
 import { Direction } from '../game/types';
 
 const Home: React.FC = () => {
+  const navigate = useNavigate();
   const {
     gameState,
     history,
@@ -31,7 +33,11 @@ const Home: React.FC = () => {
     clearIllegalMessage,
     performExport,
     performImport,
+    isWorkshopMode,
+    exitWorkshopGame,
+    getCurrentLevelId,
   } = useGameStore();
+  const inWorkshopMode = isWorkshopMode();
 
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveModalMode, setSaveModalMode] = useState<'save' | 'load'>('save');
@@ -143,12 +149,40 @@ const Home: React.FC = () => {
 
       <div className="relative z-10 container mx-auto px-4 py-6 max-w-7xl">
         <header className="text-center mb-8">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-cyan-400 via-blue-400 to-cyan-400 bg-clip-text text-transparent mb-2">
-            巡逻棋 Patrol Chess
-          </h1>
-          <p className="text-slate-400">
-            规划巡逻路径，捕获事件点，避开危险！
-          </p>
+          <div className="flex items-center justify-center gap-3 mb-2">
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-cyan-400 via-blue-400 to-cyan-400 bg-clip-text text-transparent">
+              巡逻棋 Patrol Chess
+            </h1>
+            {inWorkshopMode && (
+              <span className="px-3 py-1 bg-purple-600/30 border border-purple-500/50 text-purple-300 rounded-full text-sm font-medium">
+                工坊模式
+                {gameState.levelName && `：${gameState.levelName}`}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center justify-center gap-3">
+            <p className="text-slate-400">
+              规划巡逻路径，捕获事件点，避开危险！
+            </p>
+            <button
+              onClick={() => navigate('/workshop')}
+              className="px-3 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-cyan-500/50 text-cyan-400 hover:text-cyan-300 rounded-lg text-sm transition-all flex items-center gap-1.5"
+            >
+              <Layers className="w-4 h-4" />
+              {inWorkshopMode ? '返回工坊' : '关卡工坊'}
+            </button>
+            {inWorkshopMode && (
+              <button
+                onClick={() => {
+                  exitWorkshopGame();
+                  showNotification('已退出工坊模式', 'success');
+                }}
+                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-red-500/50 text-red-400 hover:text-red-300 rounded-lg text-sm transition-all"
+              >
+                退出工坊
+              </button>
+            )}
+          </div>
         </header>
 
         <StatusBar
@@ -168,7 +202,11 @@ const Home: React.FC = () => {
             </div>
 
             <div className="mt-10 w-full max-w-[500px]">
-              <LogPanel logs={gameState.logs} isReplaying={isReplaying} />
+              <LogPanel
+                logs={gameState.logs}
+                isReplaying={isReplaying}
+                levelSource={gameState.levelSource}
+              />
             </div>
           </div>
 

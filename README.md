@@ -1,6 +1,6 @@
 # 巡逻棋 Patrol Chess
 
-一款纯本地可玩的回合制巡逻棋小游戏。玩家在 8×8 网格中规划巡逻路径，通过捕获事件点获得分数，同时避开障碍物和危险事件。支持存档、读档、撤销操作、日志回放和存档包导入导出功能。
+一款纯本地可玩的回合制巡逻棋小游戏。玩家在 8×8 网格中规划巡逻路径，通过捕获事件点获得分数，同时避开障碍物和危险事件。支持存档、读档、撤销操作、日志回放、存档包导入导出，以及**关卡工坊**——玩家可以手动设计自定义关卡、导入导出分享、试玩并记录成绩。
 
 ## 快速开始
 
@@ -13,6 +13,12 @@ npm run dev
 
 # 构建生产版本
 npm run build
+
+# 类型检查
+npm run check
+
+# 运行单元测试
+npm test
 ```
 
 ## 游戏规则
@@ -202,6 +208,7 @@ npm run build
 ```
 src/
 ├── components/          # UI组件
+│   ├── ArchiveModal.tsx # 存档包导入导出弹窗
 │   ├── Board.tsx       # 棋盘组件
 │   ├── Cell.tsx        # 格子组件
 │   ├── ControlPanel.tsx  # 控制面板
@@ -210,14 +217,20 @@ src/
 │   ├── SaveModal.tsx     # 存档弹窗
 │   └── StatusBar.tsx    # 状态栏
 ├── game/                 # 游戏核心
-│   ├── types.ts          # 类型定义
+│   ├── types.ts          # 类型定义（含 ArchiveData）
 │   ├── gameEngine.ts     # 游戏引擎
-│   └── storage.ts        # 本地存储
+│   └── storage.ts        # 本地存储（含存档包校验/导入/导出）
 ├── hooks/                # 自定义Hook
-│   ├── useGameState.ts    # 游戏状态管理
+│   ├── useGameState.ts    # 游戏状态管理（含 performExport/performImport）
 │   └── useKeyboard.ts      # 键盘监听
 ├── pages/
 │   └── Home.tsx           # 主页面
+├── test/                  # 测试
+│   ├── archive.test.ts    # 存档包导入导出回归测试
+│   ├── replay.test.ts     # 回放链路测试
+│   ├── save-load.test.ts  # 存档/读档链路测试
+│   ├── run-tests.ts       # 独立测试脚本
+│   └── setup.ts           # 测试 setup
 ├── App.tsx
 ├── main.tsx
 └── index.css

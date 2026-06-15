@@ -1,3 +1,5 @@
+export type LevelSource = 'official' | 'workshop';
+
 export interface Position {
   x: number;
   y: number;
@@ -21,6 +23,35 @@ export interface Cell {
   type: CellType;
 }
 
+export type EditorTool = 'empty' | 'obstacle' | 'normal' | 'bonus' | 'danger' | 'player';
+
+export interface CustomLevel {
+  id: string;
+  name: string;
+  description?: string;
+  playerStart: Position;
+  obstacles: Position[];
+  events: GameEvent[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WorkshopScore {
+  levelId: string;
+  bestScore: number;
+  lastScore: number;
+  plays: number;
+  wins: number;
+  lastPlayedAt: number;
+}
+
+export interface WorkshopState {
+  levels: CustomLevel[];
+  lastEditingLevelId: string | null;
+  lastEditingSnapshot: CustomLevel | null;
+  scores: Record<string, WorkshopScore>;
+}
+
 export interface LogEntry {
   turn: number;
   action: 'move' | 'capture' | 'system' | 'gameover' | 'illegal';
@@ -31,6 +62,9 @@ export interface LogEntry {
   scoreChange?: number;
   message: string;
   timestamp: number;
+  levelSource?: LevelSource;
+  levelId?: string;
+  levelName?: string;
 }
 
 export interface GameState {
@@ -42,6 +76,9 @@ export interface GameState {
   isGameOver: boolean;
   gameOverReason?: string;
   logs: LogEntry[];
+  levelSource: LevelSource;
+  levelId?: string;
+  levelName?: string;
 }
 
 export interface SaveData {
@@ -68,6 +105,8 @@ export const STORAGE_KEYS = {
   SAVES: 'patrol_chess_saves',
   AUTO_SAVE: 'patrol_chess_auto',
   SETTINGS: 'patrol_chess_settings',
+  WORKSHOP: 'patrol_chess_workshop',
+  WORKSHOP_AUTO_SAVE: 'patrol_chess_workshop_auto',
 };
 
 export const EVENT_SCORES = {
@@ -87,4 +126,6 @@ export interface ArchiveData {
   currentHistory: GameState[];
   saves: (SaveData | null)[];
   autoSave: SaveData | null;
+  workshopLevels?: CustomLevel[];
+  workshopScores?: Record<string, WorkshopScore>;
 }

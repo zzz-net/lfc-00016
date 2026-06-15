@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trophy, Clock, Target, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Trophy, Clock, Target, AlertTriangle, CheckCircle, Layers } from 'lucide-react';
 import { GameState, MAX_TURNS, WIN_SCORE } from '../game/types';
 
 interface StatusBarProps {
@@ -59,6 +59,14 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 
   return (
     <div className="bg-slate-800/80 backdrop-blur rounded-xl p-4 border border-slate-700 shadow-lg">
+      {gameState.levelSource === 'workshop' && gameState.levelName && (
+        <div className="mb-3 px-3 py-1.5 bg-purple-500/10 border border-purple-500/30 rounded-lg inline-flex items-center gap-2">
+          <Layers className="w-4 h-4 text-purple-400" />
+          <span className="text-purple-300 text-sm font-medium">
+            工坊关卡：{gameState.levelName}
+          </span>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-3">
